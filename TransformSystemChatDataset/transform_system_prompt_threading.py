@@ -42,8 +42,8 @@ Bạn hiểu rằng các LLMs không thể tự truy cập các thông tin bên 
 Đưa ra suy luận của bạn và kết thúc bằng các slot bên trong cặp tag <slot></slot>. Ví dụ: "<slot>DATE</slot>\n<slot>TIME</slot>" hoặc "<slot></slot>" nếu không có thông tin bên ngoài nào cần thiết."""
 
 # Paths and settings
-input_path = "./data/SystemChat-2.0/ID_SystemChat_filtered_0-499.jsonl"
-output_path = "./data/SystemChat-2.0/viID_SystemChat_filtered_0-499.jsonl"
+input_path = "./data/SystemChat-2.0/ID_SystemChat_filtered_500-999.jsonl"
+output_path = "./data/SystemChat-2.0/viID_SystemChat_filtered_500-999.jsonl"
 MAX_RETRIES = 3
 NUM_ENHANCEMENTS = 1
 MAX_WORKERS = 8
