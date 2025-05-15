@@ -6,6 +6,33 @@ from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from constants.prompts import JUDGE_MESSAGES
+import re
+
+def contains_chinese(text, threshold=6):
+    """
+    Check if a text contains Chinese characters that are either:
+    1. Not fully surrounded by spaces or common punctuation.
+    2. Fully surrounded but the sequence is longer than a threshold.
+    """
+    chinese_pattern = re.compile(r'[\u4e00-\u9fff]+')
+    matches = chinese_pattern.finditer(text)
+
+    for match in matches:
+        start, end = match.start(), match.end()
+        left = text[start - 1] if start > 0 else ''
+        right = text[end] if end < len(text) else ''
+        allowed_left = {' ', '(', '"', "'", '[', '{', '-', ':', ',', '.'}
+        allowed_right = {' ', ')', '"', "'", ']', '}', '-', ':', ',', '.'}
+
+        # Case 1: not properly surrounded
+        if left not in allowed_left or right not in allowed_right:
+            return True
+
+        # Case 2: properly surrounded but longer than threshold
+        if (end - start) > threshold:
+            return True
+
+    return False
 
 # Load API settings
 load_dotenv()
@@ -15,8 +42,8 @@ model_name = os.getenv("MODEL_NAME")
 client = OpenAI(api_key="EMPTY", base_url=api_base)
 
 # Paths and settings
-system_prompts = "./data/SystemChat-2.0/viID_SystemChat_filtered_500-999.jsonl"
-output_path = "./data/SystemChat-2.0/viID_SystemChat_filtered_500-999_2turn.jsonl"
+system_prompts = "./data/SystemChat-2.0/viID_SystemChat_filtered_4000-4999.jsonl"
+output_path = "./data/SystemChat-2.0/viID_SystemChat_filtered_4000-4999_2turn.jsonl"
 
 MAX_RETRIES = 3
 NUM_TURNS = 2
@@ -104,6 +131,14 @@ def process_sample(idx, data):
             gen_user_prompt += user_prompt + "<|im_end|>\n<|im_start|>assistant\n" + assistant_response + "<|im_end|>\n<|im_start|>user\n"
 
         messages_str = json.dumps(messages, ensure_ascii=False)[1:-1]
+
+        # Check for Chinese characters
+        if contains_chinese(messages_str):
+            print(f"⚠️ Sample {sample_id} contains Chinese characters. Retrying...")
+            if attempt == MAX_RETRIES - 1:
+                print(f"❌ Sample {sample_id} failed after {MAX_RETRIES} attempts.")
+                return None
+            continue
         judge_messages = JUDGE_MESSAGES.copy()
         judge_messages.append({"role": "user", "content": messages_str})
 

@@ -5,6 +5,33 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+import re
+
+def contains_chinese(text, threshold=6):
+    """
+    Check if a text contains Chinese characters that are either:
+    1. Not fully surrounded by spaces or common punctuation.
+    2. Fully surrounded but the sequence is longer than a threshold.
+    """
+    chinese_pattern = re.compile(r'[\u4e00-\u9fff]+')
+    matches = chinese_pattern.finditer(text)
+
+    for match in matches:
+        start, end = match.start(), match.end()
+        left = text[start - 1] if start > 0 else ''
+        right = text[end] if end < len(text) else ''
+        allowed_left = {' ', '(', '"', "'", '[', '{', '-', ':', ',', '.'}
+        allowed_right = {' ', ')', '"', "'", ']', '}', '-', ':', ',', '.'}
+
+        # Case 1: not properly surrounded
+        if left not in allowed_left or right not in allowed_right:
+            return True
+
+        # Case 2: properly surrounded but longer than threshold
+        if (end - start) > threshold:
+            return True
+
+    return False
 
 
 # Load API settings
@@ -42,8 +69,8 @@ Bạn hiểu rằng các LLMs không thể tự truy cập các thông tin bên 
 Đưa ra suy luận của bạn và kết thúc bằng các slot bên trong cặp tag <slot></slot>. Ví dụ: "<slot>DATE</slot>\n<slot>TIME</slot>" hoặc "<slot></slot>" nếu không có thông tin bên ngoài nào cần thiết."""
 
 # Paths and settings
-input_path = "./data/SystemChat-2.0/ID_SystemChat_filtered_500-999.jsonl"
-output_path = "./data/SystemChat-2.0/viID_SystemChat_filtered_500-999.jsonl"
+input_path = "./data/SystemChat-2.0/ID_SystemChat_filtered_4000-4999.jsonl"
+output_path = "./data/SystemChat-2.0/viID_SystemChat_filtered_4000-4999.jsonl"
 MAX_RETRIES = 3
 NUM_ENHANCEMENTS = 1
 MAX_WORKERS = 8
@@ -73,7 +100,10 @@ def call_api_with_retry(messages, sample_id, max_tokens, extracted_tag, stage_de
             # print(content)
             # print("-"* 50)
             if f"<{extracted_tag}>" in content and f"</{extracted_tag}>" in content:
-                return extract_tag(content, extracted_tag)
+                if contains_chinese(content):
+                    raise ValueError(f"Chinese characters detected in {sample_id} [{stage_desc}]")
+                else:
+                    return extract_tag(content, extracted_tag)
             else:
                 raise ValueError(f"No <{extracted_tag}> tags in response.")
         except Exception as e:
@@ -127,12 +157,26 @@ def process_sample(idx, data):
         "messages": [{"role": "system", "content": new_system_content}]
     }
 
+processed_ids = set()
+if os.path.exists(output_path):
+    with open(output_path, "r", encoding="utf-8") as out_f:
+        for line in out_f:
+            try:
+                obj = json.loads(line)
+                processed_ids.add(obj["id"])
+            except json.JSONDecodeError:
+                continue
+print(f"🔁 Skipping {len(processed_ids)} already processed samples")
+
 # Read input
 with open(input_path, "r", encoding="utf-8") as f:
-    dataset = [json.loads(line) for line in f]
+    full_data = [json.loads(line) for line in f]
+    dataset = [sample for sample in full_data if sample.get("id") not in processed_ids]
+
+print(f"🚀 Processing {len(dataset)} new samples")
 
 # Process in parallel
-with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor, open(output_path, "w", encoding="utf-8") as outfile:
+with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor, open(output_path, "a", encoding="utf-8") as outfile:
     futures = {executor.submit(process_sample, idx, data): idx for idx, data in enumerate(dataset)}
     completed = 0
 
@@ -171,6 +215,7 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor, open(output_path, 
     if output_buffer:
         for item in output_buffer:
             outfile.write(json.dumps(item, ensure_ascii=False) + "\n")
+        outfile.flush()
         print(f"✅ Saved final {len(output_buffer)} samples")
 
 print(f"\n🎉 Done! Output written to: {output_path}")
